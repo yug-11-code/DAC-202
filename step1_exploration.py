@@ -24,7 +24,7 @@ from sklearn.model_selection import train_test_split
 
 warnings.filterwarnings("ignore")
 
-DATASET_ROOT = r"/Users/yugsharma/Downloads/Pillai Project/archive/brisc2025"
+DATASET_ROOT = r"C:\Users\Arman Srivastava\Desktop\Pillai Project\archive\brisc2025"
 OUTPUT_DIR   = r"outputs"
 RANDOM_SEED  = 42
 SAMPLE_STATS = 100
