@@ -24,8 +24,8 @@ from sklearn.model_selection import train_test_split
 
 warnings.filterwarnings("ignore")
 
-DATASET_ROOT = r"C:\Users\Arman Srivastava\Desktop\Pillai Project\archive\brisc2025"
-OUTPUT_DIR   = r"outputs"
+DATASET_ROOT = os.environ.get("DATASET_ROOT", r"C:\Users\Arman Srivastava\Desktop\Pillai Project\archive\brisc2025")
+OUTPUT_DIR   = os.environ.get("OUTPUT_DIR", "outputs")
 RANDOM_SEED  = 42
 SAMPLE_STATS = 100
 
@@ -521,15 +521,20 @@ def section7_summary(matched, unmatched_imgs, unmatched_masks,
 
 
 def main():
+    dataset_root = os.environ.get("DATASET_ROOT", DATASET_ROOT)
+    output_dir = os.environ.get("OUTPUT_DIR", OUTPUT_DIR)
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
     print("=" * 60)
     print("  Brain Tumor Segmentation - Step 1: Data Exploration")
-    print(f"  Dataset root : {DATASET_ROOT}")
-    print(f"  Output dir   : {OUTPUT_DIR}")
+    print(f"  Dataset root : {dataset_root}")
+    print(f"  Output dir   : {output_dir}")
     print("=" * 60)
 
-    matched, unmatched_imgs, unmatched_masks = section1_structure(DATASET_ROOT)
+    matched, unmatched_imgs, unmatched_masks = section1_structure(dataset_root)
     if not matched:
-        print("[ERROR] No matched image-mask pairs found. Check DATASET_ROOT and naming convention.")
+        print(f"[ERROR] No matched image-mask pairs found. Check DATASET_ROOT and naming convention.")
         sys.exit(1)
 
     sizes, corrupted = section2_image_properties(matched)

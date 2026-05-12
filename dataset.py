@@ -340,7 +340,7 @@ def load_class_weights(weights_path=None):
     return weights
 
 
-def create_dataloaders(root_dir=DATASET_ROOT,
+def create_dataloaders(root_dir=None,
                        batch_size=BATCH_SIZE,
                        num_workers=NUM_WORKERS,
                        seed=RANDOM_SEED):
@@ -350,6 +350,9 @@ def create_dataloaders(root_dir=DATASET_ROOT,
     Returns:
         train_loader, val_loader, test_loader, all_pairs
     """
+    if root_dir is None:
+        root_dir = os.environ.get("DATASET_ROOT", DATASET_ROOT)
+
     pairs = discover_pairs(root_dir)
     if not pairs:
         print("[ERROR] No image-mask pairs found.")
