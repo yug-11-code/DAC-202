@@ -1,6 +1,6 @@
 """
 debug_train.py - Lightweight Debug Training Run
-Brain Tumor Segmentation - BRISC 2025 Dataset
+Brain Tumor Binary Segmentation - BRISC 2025 Dataset
 
 Purpose:
     Verify the full pipeline (dataset -> model -> loss -> metrics -> viz)
@@ -113,12 +113,6 @@ def check_tensors(images, masks, batch_idx=0):
     """
     Print and verify tensor shapes, dtypes, and value ranges.
     Called once at the start to catch pipeline bugs early.
-
-    Why each check matters:
-        - Shape mismatch -> model crash or silent wrong results
-        - Wrong dtype -> loss function fails or gives garbage gradients
-        - Unexpected mask values -> loss computes on wrong classes
-        - NaN in images -> model immediately produces NaN outputs
     """
     print("\n--- Tensor Sanity Check (batch {}) ---".format(batch_idx))
 
@@ -134,10 +128,10 @@ def check_tensors(images, masks, batch_idx=0):
     print(f"  Mask shape  : {masks.shape}  (expected: (B, 256, 256))")
     print(f"  Mask dtype  : {masks.dtype}  (expected: int64)")
     unique_vals = torch.unique(masks).tolist()
-    print(f"  Mask unique : {unique_vals}  (expected: subset of {{0,1,2,3}})")
+    print(f"  Mask unique : {unique_vals}  (expected: subset of {{0, 1}})")
     assert masks.ndim == 3, f"Mask must be 3D (B,H,W), got {masks.ndim}D"
     assert masks.dtype == torch.int64, f"Mask dtype must be int64, got {masks.dtype}"
-    valid_classes = {0, 1, 2, 3}
+    valid_classes = {0, 1}
     assert set(int(v) for v in unique_vals) <= valid_classes, \
         f"Mask has invalid values: {unique_vals}"
     assert not torch.isnan(masks.float()).any(), "NaN detected in mask tensor!"
@@ -147,12 +141,7 @@ def check_tensors(images, masks, batch_idx=0):
 
 def check_safety(loss_val, logits, model, epoch, batch_idx):
     """
-    Detect training pathologies early:
-        - Exploding loss: training has diverged, lr too high or data bug
-        - NaN loss: numerical instability in loss computation
-        - NaN in logits: model weights have exploded
-        - Dead predictions: model predicts same class everywhere
-        - NaN gradients: backward pass is broken
+    Detect training pathologies early.
     """
     issues = []
 
@@ -204,12 +193,7 @@ def count_class_pixels(loader, num_classes=NUM_CLASSES):
 def visualize_predictions(model, loader, device, epoch, output_dir, num_samples=3):
     """
     Save a figure showing input channels, GT mask, and predicted mask
-    for a few samples. Called after each epoch to visually track learning.
-
-    Why this matters:
-        - Numeric metrics can hide subtle issues
-        - Visual inspection reveals spatial prediction quality
-        - You can spot if the model always predicts background
+    for a few samples.
     """
     model.eval()
     images, masks = next(iter(loader))
@@ -250,10 +234,10 @@ def visualize_predictions(model, loader, device, epoch, output_dir, num_samples=
 
     patches = [mpatches.Patch(color=np.array(CLASS_COLORS_RGB[c]) / 255.0,
                               label=CLASS_NAMES[c]) for c in range(NUM_CLASSES)]
-    fig.legend(handles=patches, loc="lower center", ncol=4, fontsize=10,
+    fig.legend(handles=patches, loc="lower center", ncol=NUM_CLASSES, fontsize=10,
                bbox_to_anchor=(0.5, -0.02))
 
-    plt.suptitle(f"Debug Training - Epoch {epoch + 1}", fontsize=14, y=1.01)
+    plt.suptitle(f"Debug Training - Epoch {epoch + 1} (Binary)", fontsize=14, y=1.01)
     plt.tight_layout()
     out_path = os.path.join(output_dir, f"debug_epoch_{epoch + 1:02d}.png")
     plt.savefig(out_path, bbox_inches="tight", dpi=100)
@@ -276,12 +260,6 @@ def debug_train(overfit_mode=False):
 
     Args:
         overfit_mode: if True, train on only 5 images to test memorization.
-            The model should reach near-perfect Dice on those 5 images.
-            If it cannot, something is fundamentally broken:
-                - loss function is wrong
-                - model capacity is insufficient
-                - data pipeline is corrupting inputs
-                - optimizer is not working
     """
     cfg = DEBUG_CFG.copy()
     if overfit_mode:
@@ -290,14 +268,15 @@ def debug_train(overfit_mode=False):
         cfg["epochs"] = 10
         cfg["output_dir"] = "outputs/debug_overfit"
         print("=" * 60)
-        print("  OVERFITTING TEST MODE")
+        print("  OVERFITTING TEST MODE (Binary Segmentation)")
         print(f"  Training on {cfg['overfit_count']} images for {cfg['epochs']} epochs")
         print("  Expected: loss -> ~0, Dice -> ~1.0")
         print("=" * 60)
     else:
         print("=" * 60)
-        print("  DEBUG TRAINING RUN")
+        print("  DEBUG TRAINING RUN (Binary Segmentation)")
         print(f"  {cfg['num_train']} train, {cfg['num_val']} val, {cfg['epochs']} epochs")
+        print(f"  Classes: {NUM_CLASSES} (background, tumor)")
         print("=" * 60)
 
     set_seed(cfg["seed"])
@@ -522,7 +501,7 @@ def debug_train(overfit_mode=False):
     ax1.plot(epochs_range, history["val_loss"], "r-o", label="Val Loss")
     ax1.set_xlabel("Epoch")
     ax1.set_ylabel("Loss")
-    ax1.set_title("Loss Curve (Debug)")
+    ax1.set_title("Loss Curve (Debug - Binary)")
     ax1.legend()
     ax1.grid(True, alpha=0.3)
 
@@ -530,7 +509,7 @@ def debug_train(overfit_mode=False):
     ax2.plot(epochs_range, history["val_iou"], "m-o", label="Mean IoU")
     ax2.set_xlabel("Epoch")
     ax2.set_ylabel("Score")
-    ax2.set_title("Metrics (Debug)")
+    ax2.set_title("Metrics (Debug - Binary)")
     ax2.legend()
     ax2.grid(True, alpha=0.3)
 
@@ -547,7 +526,7 @@ def debug_train(overfit_mode=False):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Debug training for brain tumor segmentation")
+    parser = argparse.ArgumentParser(description="Debug training for binary brain tumor segmentation")
     parser.add_argument("--overfit", action="store_true",
                         help="Run overfitting test on 5 images instead of normal debug")
     args = parser.parse_args()

@@ -1,6 +1,6 @@
 """
 train.py - Full Baseline Training Pipeline
-Brain Tumor Segmentation - BRISC 2025 Dataset
+Brain Tumor Binary Segmentation - BRISC 2025 Dataset
 
 Usage:
     python Code/train.py                # full training (50 epochs)
@@ -138,19 +138,18 @@ def count_class_pixels(loader):
 
 
 def dice_loss(logits, targets, num_classes=NUM_CLASSES, smooth=1.0):
-    """Soft Dice Loss averaged over classes (excluding background).
+    """Soft Dice Loss for the tumor class (class 1).
     Focal Loss optimizes per-pixel classification but doesn't directly
     maximize spatial overlap. Dice Loss fills that gap by pushing the model
     to produce contiguous, correctly-shaped tumor regions."""
     probs = torch.softmax(logits, dim=1)
     targets_oh = F.one_hot(targets, num_classes).permute(0, 3, 1, 2).float()
-    total_dice = 0.0
-    for c in range(1, num_classes):
-        p = probs[:, c]
-        t = targets_oh[:, c]
-        intersection = (p * t).sum()
-        total_dice += (2.0 * intersection + smooth) / (p.sum() + t.sum() + smooth)
-    return 1.0 - total_dice / (num_classes - 1)
+    # For binary segmentation, compute Dice only for tumor class (class 1)
+    p = probs[:, 1]
+    t = targets_oh[:, 1]
+    intersection = (p * t).sum()
+    dice = (2.0 * intersection + smooth) / (p.sum() + t.sum() + smooth)
+    return 1.0 - dice
 
 
 def check_batch_safety(loss_val, logits, model):
@@ -291,7 +290,7 @@ def plot_curves(history, output_path):
     for ax in axes.flat:
         ax.set_xlabel("Epoch")
 
-    plt.suptitle("Training Curves", fontsize=14)
+    plt.suptitle("Training Curves - Binary Segmentation", fontsize=14)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close()
@@ -329,7 +328,7 @@ def visualize_preds(model, loader, device, output_path, n=4):
         axes[i][3].imshow(_colorize(preds[i].numpy())); axes[i][3].axis("off")
     patches = [mpatches.Patch(color=np.array(CLASS_COLORS_RGB[c]) / 255.0,
                               label=CLASS_NAMES[c]) for c in range(NUM_CLASSES)]
-    fig.legend(handles=patches, loc="lower center", ncol=4, fontsize=9)
+    fig.legend(handles=patches, loc="lower center", ncol=NUM_CLASSES, fontsize=9)
     plt.tight_layout()
     plt.savefig(output_path, bbox_inches="tight", dpi=100)
     plt.close()
@@ -354,7 +353,7 @@ def train(quick=False):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("=" * 65)
-    print("  BASELINE TRAINING - RMIF Focal + Dice Loss")
+    print("  BINARY SEGMENTATION TRAINING - RMIF Focal + Dice Loss")
     print("=" * 65)
     print(f"  Device    : {device}")
     if device.type == "cuda":
@@ -362,6 +361,7 @@ def train(quick=False):
     print(f"  Epochs    : {cfg['epochs']}")
     print(f"  Batch     : {cfg['batch_size']}")
     print(f"  Loss      : RMIF Focal (gamma=2.0) + 0.5 * Dice Loss")
+    print(f"  Classes   : {NUM_CLASSES} (background, tumor)")
     if device.type == "cpu":
         print("  [NOTE] Training on CPU will be slow. Use GPU for full runs.")
 
@@ -545,9 +545,8 @@ def train(quick=False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Baseline training (Focal+Dice loss)")
+    parser = argparse.ArgumentParser(description="Binary segmentation training (Focal+Dice loss)")
     parser.add_argument("--quick", action="store_true",
                         help="Quick test run (3 epochs, 100 images)")
     args = parser.parse_args()
     train(quick=args.quick)
-

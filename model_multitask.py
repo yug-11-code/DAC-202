@@ -1,16 +1,15 @@
 """
-model_multitask.py - Dual-Head UNet for Segmentation + Classification
-Brain Tumor Segmentation - BRISC 2025 Dataset
+model_multitask.py - Dual-Head UNet for Binary Segmentation + Classification
+Brain Tumor Binary Segmentation - BRISC 2025 Dataset
 
 Architecture:
     Shared Encoder: EfficientNet-B4 (ImageNet pretrained)
-    Head 1 - Segmentation: UNet decoder + SCSE attention -> (B, 4, 256, 256) logits
-    Head 2 - Classification: GAP + FC -> (B, 4) logits
-        Classification label = dominant tumor class in the image
-        (0=background, 1=glioma, 2=meningioma, 3=pituitary)
+    Head 1 - Segmentation: UNet decoder + SCSE attention -> (B, 2, 256, 256) logits
+    Head 2 - Classification: GAP + FC -> (B, 2) logits
+        Classification label = 0 (no tumor) or 1 (tumor present)
 
     The idea: segmentation draws the tumor boundary (where),
-    classification identifies the tumor type (what).
+    classification identifies if tumor is present (what).
     Shared encoder learns richer features because both tasks demand
     different information from the same feature maps.
 
@@ -27,13 +26,13 @@ import torch.nn as nn
 import segmentation_models_pytorch as smp
 
 
-NUM_CLASSES       = 4
+NUM_CLASSES       = 2
 ENCODER_NAME      = "efficientnet-b4"
 ENCODER_WEIGHTS   = "imagenet"
 IN_CHANNELS       = 3
 IMG_SIZE          = 256
 
-CLASS_NAMES = {0: "background", 1: "glioma", 2: "meningioma", 3: "pituitary"}
+CLASS_NAMES = {0: "background", 1: "tumor"}
 
 
 class DualHeadUNet(nn.Module):
@@ -43,7 +42,8 @@ class DualHeadUNet(nn.Module):
     to suppress background noise (same as our single-head model).
 
     The classification head takes the deepest encoder features,
-    applies global average pooling, and outputs a 4-class prediction.
+    applies global average pooling, and outputs a 2-class prediction
+    (tumor present vs absent).
     """
 
     def __init__(self, device):
@@ -86,8 +86,8 @@ class DualHeadUNet(nn.Module):
             x: (B, 3, H, W) input tensor
 
         Returns:
-            seg_logits: (B, 4, H, W) segmentation logits
-            cls_logits: (B, 4) classification logits
+            seg_logits: (B, 2, H, W) segmentation logits
+            cls_logits: (B, 2) classification logits
         """
         seg_logits = self.unet(x)
 
@@ -129,7 +129,7 @@ def predict_mask(model, image_tensor, device):
         device: torch.device
 
     Returns:
-        preds: (B, H, W) int64, values in {0, 1, 2, 3}
+        preds: (B, H, W) int64, values in {0, 1}
     """
     model.eval()
     with torch.no_grad():
@@ -147,13 +147,11 @@ def get_class_masks(pred_mask):
         pred_mask: (B, H, W) int64
 
     Returns:
-        tuple of 4 binary masks, each (B, H, W) float32
+        tuple of 2 binary masks, each (B, H, W) float32
     """
     return (
         (pred_mask == 0).float(),
         (pred_mask == 1).float(),
-        (pred_mask == 2).float(),
-        (pred_mask == 3).float(),
     )
 
 
@@ -161,11 +159,11 @@ def derive_cls_label(mask_tensor):
     """Derive per-image classification label from segmentation mask.
 
     For each image in the batch:
-        - If any tumor pixels exist, label = most frequent tumor class
+        - If any tumor pixels exist (class 1), label = 1
         - If only background (class 0), label = 0
 
     Args:
-        mask_tensor: (B, H, W) int64, values in {0, 1, 2, 3}
+        mask_tensor: (B, H, W) int64, values in {0, 1}
 
     Returns:
         labels: (B,) int64 tensor
@@ -175,14 +173,8 @@ def derive_cls_label(mask_tensor):
 
     for i in range(B):
         m = mask_tensor[i]
-        tumor_counts = torch.zeros(NUM_CLASSES, dtype=torch.long,
-                                   device=mask_tensor.device)
-        for c in range(1, NUM_CLASSES):
-            tumor_counts[c] = (m == c).sum()
-
-        total_tumor = tumor_counts[1:].sum()
-        if total_tumor > 0:
-            labels[i] = torch.argmax(tumor_counts[1:]).item() + 1
+        if (m == 1).any():
+            labels[i] = 1
         else:
             labels[i] = 0
 
@@ -191,7 +183,7 @@ def derive_cls_label(mask_tensor):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  model_multitask.py - DualHeadUNet Sanity Check")
+    print("  model_multitask.py - DualHeadUNet Sanity Check (Binary)")
     print("=" * 60)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -209,8 +201,8 @@ if __name__ == "__main__":
     print("\nForward pass...")
     dummy = torch.randn(2, 3, IMG_SIZE, IMG_SIZE).to(device)
     seg_logits, cls_logits = model(dummy)
-    print(f"Seg logits: {seg_logits.shape}  (expected: (2, 4, 256, 256))")
-    print(f"Cls logits: {cls_logits.shape}  (expected: (2, 4))")
+    print(f"Seg logits: {seg_logits.shape}  (expected: (2, 2, 256, 256))")
+    print(f"Cls logits: {cls_logits.shape}  (expected: (2, 2))")
     assert seg_logits.shape == (2, NUM_CLASSES, IMG_SIZE, IMG_SIZE)
     assert cls_logits.shape == (2, NUM_CLASSES)
 
@@ -221,11 +213,11 @@ if __name__ == "__main__":
 
     print("\nDerive cls labels...")
     fake_mask = torch.zeros(2, IMG_SIZE, IMG_SIZE, dtype=torch.long).to(device)
-    fake_mask[0, 50:100, 50:100] = 1
-    fake_mask[1, 30:80, 30:80] = 3
+    fake_mask[0, 50:100, 50:100] = 1  # tumor present
+    # fake_mask[1] stays all-zero = background only
     labels = derive_cls_label(fake_mask)
-    print(f"Labels: {labels.tolist()}  (expected: [1, 3])")
-    assert labels.tolist() == [1, 3]
+    print(f"Labels: {labels.tolist()}  (expected: [1, 0])")
+    assert labels.tolist() == [1, 0]
 
     print("\nUnfreeze test...")
     model.unfreeze_encoder()

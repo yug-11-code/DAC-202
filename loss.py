@@ -1,12 +1,11 @@
 """
-loss.py - Multiclass Focal Loss with RMIF Class Weighting
-Brain Tumor Segmentation - BRISC 2025 Dataset
+loss.py - Binary Focal Loss with RMIF Class Weighting
+Brain Tumor Binary Segmentation - BRISC 2025 Dataset
 
 Loss function adapted from the LandSeg paper (Chauhan et al.):
     Focal Loss with Root Mean Inverse Frequency (RMIF) alpha weighting.
-    Originally used for 9-class land cover segmentation with extreme
-    class imbalance. Applied here to 4-class brain tumor segmentation
-    (C = 4 instead of C = 9).
+    Applied here to 2-class brain tumor binary segmentation
+    (C = 2: background vs tumor).
 
 This is a SINGLE unified loss -- the RMIF weights serve as the per-class
 alpha inside the Focal Loss formula. There is no separate CE term,
@@ -20,22 +19,16 @@ where:
     w_c   = RMIF weight for class c  (this IS alpha)
     gamma = 2.0 (fixed)
 
-Approximate BRISC 2025 class pixel counts (5000 train images, 256x256):
-    No Tumor   (class 0): ~250,000,000 pixels  <- dominant (~85-90%)
-    Glioma     (class 1): ~15,000,000  pixels   (~4-6%)
-    Meningioma (class 2): ~10,000,000  pixels   (~2-4%)
-    Pituitary  (class 3): ~12,000,000  pixels   (~3-5%)
-
 Usage:
     from loss import compute_rmif_weights, get_loss_fn
 
-    weights = compute_rmif_weights(class_pixel_counts, num_classes=4, device=device)
+    weights = compute_rmif_weights(class_pixel_counts, num_classes=2, device=device)
     loss_fn = get_loss_fn(rmif_weights=weights, gamma=2.0)
     loss    = loss_fn(logits, targets)
 
 Input shapes:
-    logits  : (B, 4, 256, 256) float32 -- raw logits from model (NO softmax)
-    targets : (B, 256, 256)    int64   -- class labels {0, 1, 2, 3}
+    logits  : (B, 2, 256, 256) float32 -- raw logits from model (NO softmax)
+    targets : (B, 256, 256)    int64   -- class labels {0, 1}
 
 Output:
     scalar loss tensor (mean reduction)
@@ -47,7 +40,7 @@ import torch.nn.functional as F
 eps = 1e-8
 
 
-def compute_rmif_weights(class_pixel_counts, num_classes=4, device="cpu"):
+def compute_rmif_weights(class_pixel_counts, num_classes=2, device="cpu"):
     """
     Compute Root Mean Inverse Frequency (RMIF) class weights.
 
@@ -61,8 +54,8 @@ def compute_rmif_weights(class_pixel_counts, num_classes=4, device="cpu"):
 
     Args:
         class_pixel_counts: list or 1-D tensor of length num_classes
-            Pixel counts [N_0, N_1, N_2, N_3] from the training set.
-        num_classes: int, number of segmentation classes (default 4)
+            Pixel counts [N_0, N_1] from the training set.
+        num_classes: int, number of segmentation classes (default 2)
         device: torch device to place weights on
 
     Returns:
@@ -85,7 +78,7 @@ def compute_rmif_weights(class_pixel_counts, num_classes=4, device="cpu"):
 
 def get_loss_fn(rmif_weights, gamma=2.0):
     """
-    Build a Multiclass Focal Loss function with RMIF alpha weighting.
+    Build a Binary Focal Loss function with RMIF alpha weighting.
 
     The returned callable implements:
         FL(p_t) = -w_c * (1 - p_t)^gamma * log(p_t)
@@ -105,11 +98,11 @@ def get_loss_fn(rmif_weights, gamma=2.0):
 
     def loss_fn(logits, targets):
         """
-        Compute Multiclass Focal Loss with RMIF alpha.
+        Compute Binary Focal Loss with RMIF alpha.
 
         Args:
             logits:  (B, C, H, W) float32 -- raw logits from model
-            targets: (B, H, W)    int64   -- class labels {0, ..., C-1}
+            targets: (B, H, W)    int64   -- class labels {0, 1}
 
         Returns:
             scalar loss tensor (mean reduction)
@@ -134,34 +127,36 @@ def get_loss_fn(rmif_weights, gamma=2.0):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  loss.py - Multiclass Focal Loss + RMIF Sanity Check")
+    print("  loss.py - Binary Focal Loss + RMIF Sanity Check")
     print("=" * 60)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\nDevice: {device}")
 
+    num_classes = 2
+
     print("\n--- Check 1: RMIF weight properties ---")
-    class_counts = [250_000_000, 15_000_000, 10_000_000, 12_000_000]
-    weights = compute_rmif_weights(class_counts, num_classes=4, device=device)
+    class_counts = [250_000_000, 30_000_000]
+    weights = compute_rmif_weights(class_counts, num_classes=num_classes, device=device)
 
     print(f"RMIF weights : {weights}")
-    print(f"Weights sum  : {weights.sum().item():.4f}  (expected ~= 4.0)")
+    print(f"Weights sum  : {weights.sum().item():.4f}  (expected ~= {num_classes})")
     print(f"Weights max  : {weights.max().item():.4f}  (expected <= 10.0)")
 
-    assert weights.shape == (4,),                        "Wrong weight shape"
-    assert weights.dtype == torch.float32,               "Weights must be float32"
-    assert abs(weights.sum().item() - 4.0) < 0.01,      "Weights must sum to 4.0"
-    assert weights.max().item() <= 10.0,                 "Weights must be clipped to 10.0"
-    assert (weights > 0).all(),                          "All weights must be positive"
-    assert weights[0] == weights.min(),                  "Background must have lowest weight"
-    assert (weights[1:] > weights[0]).all(),             "Tumor weights > background weight"
+    assert weights.shape == (num_classes,),                  "Wrong weight shape"
+    assert weights.dtype == torch.float32,                   "Weights must be float32"
+    assert abs(weights.sum().item() - num_classes) < 0.01,   f"Weights must sum to {num_classes}"
+    assert weights.max().item() <= 10.0,                     "Weights must be clipped to 10.0"
+    assert (weights > 0).all(),                              "All weights must be positive"
+    assert weights[0] == weights.min(),                      "Background must have lowest weight"
+    assert weights[1] > weights[0],                          "Tumor weight > background weight"
     print("  All weight assertions passed!")
 
     print("\n--- Check 2: Loss function output properties ---")
     loss_fn = get_loss_fn(rmif_weights=weights, gamma=2.0)
 
-    logits  = torch.randn(4, 4, 256, 256).to(device)
-    targets = torch.randint(0, 4, (4, 256, 256)).to(device)
+    logits  = torch.randn(4, num_classes, 256, 256).to(device)
+    targets = torch.randint(0, num_classes, (4, 256, 256)).to(device)
     loss    = loss_fn(logits, targets)
 
     print(f"Loss value   : {loss.item():.4f}")
@@ -172,12 +167,12 @@ if __name__ == "__main__":
     print("  All loss property assertions passed!")
 
     print("\n--- Check 3: Loss direction (wrong > correct) ---")
-    bad_logits = torch.zeros(2, 4, 256, 256).to(device)
+    bad_logits = torch.zeros(2, num_classes, 256, 256).to(device)
     bad_logits[:, 0, :, :] = 10.0
     tumor_targets = torch.ones(2, 256, 256, dtype=torch.long).to(device)
     bad_loss = loss_fn(bad_logits, tumor_targets)
 
-    good_logits = torch.zeros(2, 4, 256, 256).to(device)
+    good_logits = torch.zeros(2, num_classes, 256, 256).to(device)
     good_logits[:, 1, :, :] = 10.0
     good_loss = loss_fn(good_logits, tumor_targets)
 
@@ -188,11 +183,11 @@ if __name__ == "__main__":
     print("  Loss direction assertion passed!")
 
     print("\n--- Check 4: Focal effect (confident < uncertain) ---")
-    confident_correct = torch.zeros(2, 4, 256, 256).to(device)
+    confident_correct = torch.zeros(2, num_classes, 256, 256).to(device)
     confident_correct[:, 1, :, :] = 100.0
     confident_loss = loss_fn(confident_correct, tumor_targets)
 
-    uncertain_correct = torch.zeros(2, 4, 256, 256).to(device)
+    uncertain_correct = torch.zeros(2, num_classes, 256, 256).to(device)
     uncertain_correct[:, 1, :, :] = 0.1
     uncertain_loss = loss_fn(uncertain_correct, tumor_targets)
 

@@ -1,6 +1,6 @@
 """
 compare_results.py - Compare All Training Experiments
-Brain Tumor Segmentation - BRISC 2025 Dataset
+Brain Tumor Binary Segmentation - BRISC 2025 Dataset
 
 Compares results from all available experiments:
   - Focal+Dice (train.py)
@@ -26,7 +26,8 @@ import matplotlib.pyplot as plt
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "outputs")
 OUT_DIR = os.path.join(OUTPUT_DIR, "comparison")
 
-CLASS_NAMES = {0: "background", 1: "glioma", 2: "meningioma", 3: "pituitary"}
+NUM_CLASSES = 2
+CLASS_NAMES = {0: "background", 1: "tumor"}
 
 EXPERIMENTS = {
     "focal_dice": {
@@ -73,13 +74,13 @@ def print_comparison_table(loaded):
         ("Macro F1", "macro_f1"),
         ("Weighted F1", "weighted_f1"),
         ("Mean Dice (all)", "mean_dice"),
-        ("Mean Dice (tumor)", "mean_dice_tumor"),
+        ("Tumor Dice", "mean_dice_tumor"),
         ("Mean IoU", "mean_iou"),
         ("ROC-AUC", "roc_auc"),
     ]
 
     sep = "=" * (30 + 15 * len(names))
-    lines = [sep, "  COMPARISON TABLE", sep]
+    lines = [sep, "  COMPARISON TABLE (Binary Segmentation)", sep]
 
     header = f"  {'Metric':<25s}"
     for n in names:
@@ -110,7 +111,7 @@ def print_comparison_table(loaded):
     lines.append(header2)
     lines.append(f"  {'-'*25}" + ("-+-" + "-"*12) * len(names) + "-+---------")
 
-    for c in range(4):
+    for c in range(NUM_CLASSES):
         cname = CLASS_NAMES[c]
         row = f"  {cname:<25s}"
         vals = {}
@@ -135,7 +136,7 @@ def plot_training_curves(logs, output_path):
     plot_specs = [
         (axes[0, 0], "val_loss", "Validation Loss", "Loss"),
         (axes[0, 1], "mean_dice", "Mean Dice Score", "Dice"),
-        (axes[1, 0], "tumor_dice", "Tumor Dice (classes 1-3)", "Tumor Dice"),
+        (axes[1, 0], "tumor_dice", "Tumor Dice", "Tumor Dice"),
         (axes[1, 1], "macro_f1", "Macro F1 Score", "Macro F1"),
     ]
 
@@ -150,7 +151,7 @@ def plot_training_curves(logs, output_path):
         ax.set_xlabel("Epoch"); ax.set_ylabel(ylabel)
         ax.legend(); ax.grid(True, alpha=0.3)
 
-    plt.suptitle("Training Comparison — All Architectures",
+    plt.suptitle("Training Comparison — Binary Segmentation",
                  fontsize=15, fontweight="bold", y=1.01)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
@@ -167,9 +168,8 @@ def plot_bar_chart(loaded, output_path):
         ("Mean Dice", "mean_dice"),
         ("Tumor Dice", "mean_dice_tumor"),
         ("Mean IoU", "mean_iou"),
+        ("Tumor Dice (cls)", f"pcd_1"),
     ]
-    for c in range(1, 4):
-        metric_keys.append((f"{CLASS_NAMES[c].capitalize()} Dice", f"pcd_{c}"))
 
     labels = [m[0] for m in metric_keys]
     x = np.arange(len(labels))
@@ -199,7 +199,7 @@ def plot_bar_chart(loaded, output_path):
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=10)
     ax.set_ylabel("Score", fontsize=12)
-    ax.set_title("Test Metrics — All Architectures", fontsize=14, fontweight="bold")
+    ax.set_title("Test Metrics — Binary Segmentation", fontsize=14, fontweight="bold")
     ax.legend(fontsize=11); ax.grid(True, alpha=0.2, axis="y"); ax.set_ylim(0, 1.05)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")

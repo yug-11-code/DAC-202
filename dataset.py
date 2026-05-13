@@ -1,15 +1,15 @@
 """
 dataset.py - Preprocessing & DataLoader Pipeline
-Brain Tumor Segmentation - BRISC 2025 Dataset
+Brain Tumor Binary Segmentation - BRISC 2025 Dataset
 
-Aligned with step1_exploration.py findings:
+Binary segmentation variant:
   - Dataset: BRISC 2025 (segmentation_task)
   - Structure: segmentation_task/{train,test}/{images,masks}/
   - Images: .jpg in images/ folders
   - Masks:  .png in masks/ folders (same stem as image)
-  - 4 classes: 0=background, 1=glioma, 2=meningioma, 3=pituitary
+  - 2 classes: 0=background, 1=tumor (all tumor types merged)
   - 3-channel input: [Original Gray, CLAHE, Sobel Edge Magnitude]
-  - Split: 80/10/10 stratified by rarest tumor class (matches step1)
+  - Split: 80/10/10 stratified by tumor presence
   - Normalization: ImageNet mean/std for pretrained EfficientNet-B4 encoder
   - RMIF class weights loaded from outputs/class_weights.json (from step1)
 """
@@ -42,14 +42,12 @@ IMG_SIZE     = 256
 BATCH_SIZE   = 16
 NUM_WORKERS  = 2
 RANDOM_SEED  = 42
-NUM_CLASSES  = 4
+NUM_CLASSES  = 2
 
-CLASS_NAMES  = {0: "background", 1: "glioma", 2: "meningioma", 3: "pituitary"}
+CLASS_NAMES  = {0: "background", 1: "tumor"}
 CLASS_COLORS_RGB = {
     0: (0,   0,   0),
     1: (255, 0,   0),
-    2: (0,   255, 0),
-    3: (0,   0,   255),
 }
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
@@ -149,24 +147,20 @@ def build_3channel(image_bgr):
 
 def read_mask(mask_path):
     """
-    Read a BRISC 2025 segmentation mask and convert to multi-class labels.
+    Read a BRISC 2025 segmentation mask and convert to BINARY labels.
 
-    BRISC 2025 masks are BINARY:
+    BRISC 2025 masks are BINARY at pixel level:
       - 0   = background
       - 255 = tumor region
       - 1-7 and 248-254 = anti-aliasing artifacts at boundaries
 
-    The tumor CLASS is encoded in the filename:
-      - '_gl_' -> class 1 (glioma)
-      - '_me_' -> class 2 (meningioma)
-      - '_pi_' -> class 3 (pituitary)
-
-    Strategy: threshold at 127 to get binary mask, then assign the
-    class label derived from the filename.
+    For binary segmentation, we threshold at 127 and assign:
+      - 0 = background (no tumor)
+      - 1 = tumor (any type)
 
     Falls back to PIL if cv2 returns None.
     If 3-channel, takes the first channel only.
-    Returns: numpy array (H, W) dtype uint8 with values in {0, 1, 2, 3}.
+    Returns: numpy array (H, W) dtype uint8 with values in {0, 1}.
     """
     mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
     if mask is None:
@@ -176,32 +170,10 @@ def read_mask(mask_path):
 
     mask = mask.astype(np.uint8)
 
-    tumor_class = _class_from_filename(mask_path)
-
+    # Binary: any tumor pixel (regardless of type) -> 1, background -> 0
     binary = (mask > 127).astype(np.uint8)
-    result = binary * tumor_class
 
-    return result
-
-
-def _class_from_filename(path):
-    """
-    Extract tumor class label from BRISC 2025 filename convention.
-
-    Filename pattern: brisc2025_{split}_{id}_{type}_{plane}_{seq}.png
-    where type is: gl (glioma=1), me (meningioma=2), pi (pituitary=3)
-
-    Returns: int class label (1, 2, or 3). Defaults to 1 if unrecognised.
-    """
-    basename = os.path.basename(path).lower()
-    if '_gl_' in basename:
-        return 1
-    elif '_me_' in basename:
-        return 2
-    elif '_pi_' in basename:
-        return 3
-    else:
-        return 1
+    return binary
 
 
 def get_train_transforms(img_size=IMG_SIZE):
@@ -234,12 +206,13 @@ def get_val_transforms(img_size=IMG_SIZE):
 
 class BRISCDataset(Dataset):
     """
-    PyTorch Dataset for BRISC brain tumor segmentation.
+    PyTorch Dataset for BRISC brain tumor binary segmentation.
 
     Each sample returns:
         image: (3, H, W) float32 tensor - normalized 3-channel input
                [gray, clahe, sobel_edges]
-        mask:  (H, W) int64 tensor - class labels {0,1,2,3}
+        mask:  (H, W) int64 tensor - class labels {0, 1}
+               0 = background, 1 = tumor
     """
 
     def __init__(self, pairs, transform=None):
@@ -283,53 +256,32 @@ class BRISCDataset(Dataset):
         return image_tensor, mask_tensor
 
 
-def _assign_stratification_label(mask_path, images_with):
+def _assign_stratification_label(mask_path):
     """
     Determine stratification label for splitting.
-    Uses the rarest tumor class present in the mask.
-    Falls back to 0 (background) if no tumor is found.
+    For binary segmentation: 1 if tumor present, 0 otherwise.
     """
     try:
         mask = read_mask(mask_path)
-        present = [c for c in [1, 2, 3] if (mask == c).any()]
-        if not present:
-            return 0
-        rarest = min(present, key=lambda c: images_with.get(c, 0))
-        return rarest
+        if mask.any():
+            return 1
+        return 0
     except Exception:
         return 0
-
-
-def _compute_images_with(pairs):
-    """
-    Count how many images contain each class.
-    Needed for stratification by rarest class.
-    """
-    from collections import defaultdict
-    images_with = defaultdict(int)
-    for _, mask_path in pairs:
-        try:
-            mask = read_mask(mask_path)
-            for c in [0, 1, 2, 3]:
-                if (mask == c).any():
-                    images_with[c] += 1
-        except Exception:
-            pass
-    return dict(images_with)
 
 
 def load_class_weights(weights_path=None):
     """
     Load RMIF class weights from the JSON file produced by step1_exploration.
-    Returns a list [w0, w1, w2, w3] suitable for loss functions.
+    Returns a list [w0, w1] suitable for loss functions.
     """
     if weights_path is None:
         weights_path = os.path.join(OUTPUT_DIR, "class_weights.json")
 
     if not os.path.exists(weights_path):
         print(f"[WARN] Class weights file not found: {weights_path}")
-        print("  Run step1_exploration.py first, or weights default to [1,1,1,1]")
-        return [1.0, 1.0, 1.0, 1.0]
+        print("  Run step1_exploration.py first, or weights default to [1,1]")
+        return [1.0, 1.0]
 
     with open(weights_path, "r") as f:
         data = json.load(f)
@@ -358,15 +310,16 @@ def create_dataloaders(root_dir=None,
         print("[ERROR] No image-mask pairs found.")
         sys.exit(1)
 
-    print("\nComputing class frequencies for stratified split...")
-    images_with = _compute_images_with(pairs)
-    for c in range(NUM_CLASSES):
-        print(f"  {CLASS_NAMES[c]:12s}: {images_with.get(c, 0)} images")
-
+    print("\nComputing stratification labels for split...")
     strat_labels = [
-        _assign_stratification_label(mask_path, images_with)
+        _assign_stratification_label(mask_path)
         for _, mask_path in pairs
     ]
+
+    tumor_count = sum(strat_labels)
+    bg_count = len(strat_labels) - tumor_count
+    print(f"  Images with tumor    : {tumor_count}")
+    print(f"  Images without tumor : {bg_count}")
 
     indices = list(range(len(pairs)))
     try:
@@ -459,7 +412,7 @@ def run_sanity_checks(train_loader, val_loader, test_loader, total_pairs):
     else:
         print("  [OK] Image values in expected normalized range")
 
-    expected_classes = {0, 1, 2, 3}
+    expected_classes = {0, 1}
     if set(int(v) for v in unique_vals) <= expected_classes:
         print(f"  [OK] Mask contains valid class labels (subset of {expected_classes})")
     else:
@@ -491,7 +444,7 @@ def run_sanity_checks(train_loader, val_loader, test_loader, total_pairs):
 
     patches = [mpatches.Patch(color=np.array(CLASS_COLORS_RGB[c]) / 255.0,
                               label=CLASS_NAMES[c]) for c in range(NUM_CLASSES)]
-    fig.legend(handles=patches, loc="lower center", ncol=4, fontsize=10,
+    fig.legend(handles=patches, loc="lower center", ncol=NUM_CLASSES, fontsize=10,
                bbox_to_anchor=(0.5, -0.02))
 
     plt.suptitle("Sample from Train DataLoader (denormalized)", fontsize=14, y=1.02)
@@ -508,7 +461,7 @@ def run_sanity_checks(train_loader, val_loader, test_loader, total_pairs):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  Brain Tumor Segmentation - Dataset & DataLoader Pipeline")
+    print("  Brain Tumor Binary Segmentation - Dataset & DataLoader Pipeline")
     print("  Dataset: BRISC 2025 (segmentation_task)")
     print(f"  Root     : {DATASET_ROOT}")
     print(f"  Size     : {IMG_SIZE}x{IMG_SIZE}")

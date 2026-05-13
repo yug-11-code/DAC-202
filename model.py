@@ -1,12 +1,12 @@
 """
 model.py - UNet + EfficientNet-B4 Segmentation Model (with SCSE Attention)
-Brain Tumor Segmentation - BRISC 2025 Dataset
+Brain Tumor Binary Segmentation - BRISC 2025 Dataset
 
 Architecture:
     - Encoder: EfficientNet-B4 (ImageNet pretrained)
     - Decoder: UNet with SCSE (Spatial & Channel Squeeze-Excitation) attention
     - Input:   (B, 3, 256, 256) float32 - [gray, clahe, sobel_edges]
-    - Output:  (B, 4, 256, 256) raw logits (NO softmax)
+    - Output:  (B, 2, 256, 256) raw logits (NO softmax)
 
 SCSE Attention:
     Each skip connection learns which spatial locations AND which feature
@@ -14,11 +14,9 @@ SCSE Attention:
     it reaches the decoder. This reduces false positives on healthy tissue
     with zero extra training cost.
 
-Classes:
+Classes (Binary):
     0 = No Tumor (background)
-    1 = Glioma
-    2 = Meningioma
-    3 = Pituitary Tumor
+    1 = Tumor (any type)
 
 Usage:
     from model import get_model, predict_mask, freeze_encoder, unfreeze_encoder
@@ -27,20 +25,20 @@ Usage:
     model = get_model(device)           # frozen encoder by default
     unfreeze_encoder(model)             # call after epoch 5
     preds = predict_mask(model, imgs, device)   # (B, H, W) int64
-    masks = get_class_masks(preds)              # 4 binary masks
+    masks = get_class_masks(preds)              # 2 binary masks
 """
 
 import torch
 import segmentation_models_pytorch as smp
 
 
-NUM_CLASSES    = 4
+NUM_CLASSES    = 2
 ENCODER_NAME   = "efficientnet-b4"
 ENCODER_WEIGHTS = "imagenet"
 IN_CHANNELS    = 3
 IMG_SIZE       = 256
 
-CLASS_NAMES = {0: "background", 1: "glioma", 2: "meningioma", 3: "pituitary"}
+CLASS_NAMES = {0: "background", 1: "tumor"}
 
 
 def get_model(device):
@@ -101,7 +99,7 @@ def predict_mask(model, image_tensor, device):
         device: torch.device
 
     Returns:
-        preds: (B, H, W) int64 tensor, values in {0, 1, 2, 3}
+        preds: (B, H, W) int64 tensor, values in {0, 1}
     """
     model.eval()
     with torch.no_grad():
@@ -121,20 +119,18 @@ def get_class_masks(pred_mask):
         pred_mask: (B, H, W) int64 tensor from predict_mask()
 
     Returns:
-        tuple of 4 binary masks (each B, H, W, float32):
-            (no_tumor_mask, glioma_mask, meningioma_mask, pituitary_mask)
+        tuple of 2 binary masks (each B, H, W, float32):
+            (background_mask, tumor_mask)
     """
-    no_tumor_mask   = (pred_mask == 0).float()
-    glioma_mask     = (pred_mask == 1).float()
-    meningioma_mask = (pred_mask == 2).float()
-    pituitary_mask  = (pred_mask == 3).float()
+    background_mask = (pred_mask == 0).float()
+    tumor_mask      = (pred_mask == 1).float()
 
-    return no_tumor_mask, glioma_mask, meningioma_mask, pituitary_mask
+    return background_mask, tumor_mask
 
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  model.py - UNet + EfficientNet-B4 Sanity Check")
+    print("  model.py - UNet + EfficientNet-B4 Sanity Check (Binary)")
     print("=" * 60)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -153,7 +149,7 @@ if __name__ == "__main__":
     dummy = torch.randn(2, 3, IMG_SIZE, IMG_SIZE).to(device)
     logits = model(dummy)
     assert logits.shape == (2, NUM_CLASSES, IMG_SIZE, IMG_SIZE), \
-        f"Logit shape mismatch: expected (2,4,256,256), got {logits.shape}"
+        f"Logit shape mismatch: expected (2,2,256,256), got {logits.shape}"
     print(f"Logits shape: {logits.shape}  (correct)")
     print(f"Logits dtype: {logits.dtype}")
     print(f"Logits range: [{logits.min().item():.4f}, {logits.max().item():.4f}]")
@@ -163,7 +159,7 @@ if __name__ == "__main__":
     assert preds.shape == (2, IMG_SIZE, IMG_SIZE), \
         f"Pred shape mismatch: expected (2,256,256), got {preds.shape}"
     unique_vals = preds.unique().cpu().numpy().tolist()
-    assert set(unique_vals).issubset({0, 1, 2, 3}), \
+    assert set(unique_vals).issubset({0, 1}), \
         f"Unexpected predicted classes: {unique_vals}"
     print(f"Preds shape: {preds.shape}  (correct)")
     print(f"Preds dtype: {preds.dtype}")
@@ -171,7 +167,7 @@ if __name__ == "__main__":
 
     print("\nExtracting per-class masks...")
     masks = get_class_masks(preds)
-    mask_names = ["no_tumor", "glioma", "meningioma", "pituitary"]
+    mask_names = ["background", "tumor"]
     for name, m in zip(mask_names, masks):
         assert m.shape == (2, IMG_SIZE, IMG_SIZE), \
             f"{name}_mask shape mismatch: {m.shape}"

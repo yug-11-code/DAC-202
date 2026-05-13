@@ -1,6 +1,6 @@
 """
 train_ce.py - Baseline Training with Weighted CrossEntropyLoss
-Brain Tumor Segmentation - BRISC 2025 Dataset
+Brain Tumor Binary Segmentation - BRISC 2025 Dataset
 
 This is the CONTROL experiment. It uses standard weighted CrossEntropyLoss
 so you can compare against the Focal+Dice loss in train.py.
@@ -230,7 +230,7 @@ def plot_confusion_matrix(cm, output_path, class_names=CLASS_NAMES):
     ax.set_yticklabels([class_names[i] for i in range(len(class_names))])
     ax.set_xlabel("Predicted")
     ax.set_ylabel("True")
-    ax.set_title("Confusion Matrix - Weighted CE Loss")
+    ax.set_title("Confusion Matrix - Weighted CE Loss (Binary)")
     plt.colorbar(im, fraction=0.046, pad=0.04)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
@@ -262,7 +262,7 @@ def plot_curves(history, output_path):
 
     for ax in axes.flat:
         ax.set_xlabel("Epoch")
-    plt.suptitle("Training Curves - Weighted CrossEntropyLoss", fontsize=14)
+    plt.suptitle("Training Curves - Weighted CE (Binary Segmentation)", fontsize=14)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close()
@@ -300,7 +300,7 @@ def visualize_preds(model, loader, device, output_path, n=4):
         axes[i][3].imshow(_colorize(preds[i].numpy())); axes[i][3].axis("off")
     patches = [mpatches.Patch(color=np.array(CLASS_COLORS_RGB[c]) / 255.0,
                               label=CLASS_NAMES[c]) for c in range(NUM_CLASSES)]
-    fig.legend(handles=patches, loc="lower center", ncol=4, fontsize=9)
+    fig.legend(handles=patches, loc="lower center", ncol=NUM_CLASSES, fontsize=9)
     plt.tight_layout()
     plt.savefig(output_path, bbox_inches="tight", dpi=100)
     plt.close()
@@ -323,7 +323,7 @@ def train_ce(quick=False):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("=" * 65)
-    print("  BASELINE TRAINING - Weighted CrossEntropyLoss")
+    print("  BINARY SEGMENTATION TRAINING - Weighted CrossEntropyLoss")
     print("=" * 65)
     print(f"  Device    : {device}")
     if device.type == "cuda":
@@ -331,6 +331,7 @@ def train_ce(quick=False):
     print(f"  Epochs    : {cfg['epochs']}")
     print(f"  Batch     : {cfg['batch_size']}")
     print(f"  Loss      : Weighted CrossEntropyLoss")
+    print(f"  Classes   : {NUM_CLASSES} (background, tumor)")
     if device.type == "cpu":
         print("  [NOTE] Training on CPU will be slow. Use GPU for full runs.")
 
@@ -517,7 +518,7 @@ def train_ce(quick=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Baseline training with Weighted CrossEntropyLoss")
+        description="Binary segmentation training with Weighted CrossEntropyLoss")
     parser.add_argument("--quick", action="store_true",
                         help="Quick test run (3 epochs, 100 images)")
     args = parser.parse_args()

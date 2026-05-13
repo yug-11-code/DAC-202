@@ -1,6 +1,15 @@
 """
-metrics.py - Segmentation Metrics for Brain Tumor Project
+metrics.py - Segmentation Metrics for Brain Tumor Binary Segmentation
 Computes all metrics from a running confusion matrix (memory-efficient).
+
+Evaluation metrics (same as DAC_202_report):
+  - Pixel Accuracy
+  - Macro F1, Weighted F1
+  - Per-class Dice, IoU
+  - Mean Dice, Tumor Dice
+  - Mean IoU
+  - ROC-AUC
+  - Precision, Recall, Specificity
 """
 
 import numpy as np
@@ -8,8 +17,8 @@ import torch
 from sklearn.metrics import roc_auc_score
 
 
-NUM_CLASSES = 4
-CLASS_NAMES = {0: "background", 1: "glioma", 2: "meningioma", 3: "pituitary"}
+NUM_CLASSES = 2
+CLASS_NAMES = {0: "background", 1: "tumor"}
 
 
 class SegmentationMetrics:
@@ -90,7 +99,8 @@ class SegmentationMetrics:
         weighted_f1 = sum(f * s for f, s in zip(f1_list, support_list)) / (total_support + 1e-8)
 
         mean_dice = np.mean([per_class[c]["dice"] for c in range(self.num_classes)])
-        mean_dice_tumor = np.mean([per_class[c]["dice"] for c in range(1, self.num_classes)])
+        # For binary: tumor dice is just class 1
+        mean_dice_tumor = per_class[1]["dice"] if 1 in per_class else 0.0
         mean_iou = np.mean([per_class[c]["iou"] for c in range(self.num_classes)])
 
         roc_auc = self._compute_roc_auc()
@@ -116,6 +126,9 @@ class SegmentationMetrics:
             present = np.unique(labels)
             if len(present) < 2:
                 return None
+            # For binary segmentation, use the tumor probability (class 1)
+            if probs.shape[1] == 2:
+                return roc_auc_score(labels, probs[:, 1])
             return roc_auc_score(labels, probs, multi_class="ovr", average="macro",
                                  labels=list(range(self.num_classes)))
         except Exception:
@@ -139,10 +152,10 @@ def print_metrics(metrics, class_names=CLASS_NAMES):
     print(f"  Macro F1       : {metrics['macro_f1']:.4f}")
     print(f"  Weighted F1    : {metrics['weighted_f1']:.4f}")
     print(f"  Mean Dice      : {metrics['mean_dice']:.4f}")
-    print(f"  Mean Dice (tumor): {metrics['mean_dice_tumor']:.4f}")
+    print(f"  Tumor Dice     : {metrics['mean_dice_tumor']:.4f}")
     print(f"  Mean IoU       : {metrics['mean_iou']:.4f}")
     if metrics["roc_auc"] is not None:
-        print(f"  ROC-AUC (macro): {metrics['roc_auc']:.4f}")
+        print(f"  ROC-AUC        : {metrics['roc_auc']:.4f}")
     print(f"\n  {'Class':12s} | {'Prec':>6s} {'Rec':>6s} {'F1':>6s} {'Spec':>6s} {'Dice':>6s} {'IoU':>6s} | {'Support':>10s}")
     print(f"  {'-'*12}-+-{'-'*42}-+-{'-'*10}")
     for c in range(len(class_names)):

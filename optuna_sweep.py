@@ -1,9 +1,9 @@
 """
 optuna_sweep.py - Optuna Hyperparameter Optimization
-Brain Tumor Segmentation - BRISC 2025 Dataset
+Brain Tumor Binary Segmentation - BRISC 2025 Dataset
 
 Searches over: lr, gamma, unfreeze_epoch, batch_size, weight_decay, dice_loss_weight
-Maximizes: mean_dice_tumor (avg Dice of glioma + meningioma + pituitary)
+Maximizes: mean_dice_tumor (Dice of the tumor class)
 
 Usage:
     python Code/optuna_sweep.py                     # local quick test (3 trials, 2 epochs)
@@ -56,16 +56,15 @@ def set_seed(seed=42):
 
 
 def dice_loss(logits, targets, num_classes=NUM_CLASSES, smooth=1.0):
-    """Soft Dice Loss averaged over tumor classes (excluding background)."""
+    """Soft Dice Loss for the tumor class (class 1)."""
     probs = torch.softmax(logits, dim=1)
     targets_oh = F.one_hot(targets, num_classes).permute(0, 3, 1, 2).float()
-    total_dice = 0.0
-    for c in range(1, num_classes):
-        p = probs[:, c]
-        t = targets_oh[:, c]
-        intersection = (p * t).sum()
-        total_dice += (2.0 * intersection + smooth) / (p.sum() + t.sum() + smooth)
-    return 1.0 - total_dice / (num_classes - 1)
+    # Binary: compute Dice only for tumor class (class 1)
+    p = probs[:, 1]
+    t = targets_oh[:, 1]
+    intersection = (p * t).sum()
+    dice = (2.0 * intersection + smooth) / (p.sum() + t.sum() + smooth)
+    return 1.0 - dice
 
 
 _DATA_CACHE = {}
@@ -240,7 +239,7 @@ def optuna_sweep(n_trials=20, epochs_per_trial=10, quick=False):
         direction="maximize",
         sampler=sampler,
         pruner=pruner,
-        study_name="brain_tumor_sweep",
+        study_name="brain_tumor_binary_sweep",
     )
 
     print("\n--- Starting optimization ---\n")

@@ -1,6 +1,6 @@
 """
-train_multitask.py - Dual-Head Training (Segmentation + Classification)
-Brain Tumor Segmentation - BRISC 2025 Dataset
+train_multitask.py - Dual-Head Training (Binary Segmentation + Classification)
+Brain Tumor Binary Segmentation - BRISC 2025 Dataset
 
 Trains DualHeadUNet with combined loss:
     L = seg_weight * FocalLoss(seg) + cls_weight * CE(cls)
@@ -79,11 +79,12 @@ class CSVLogger:
 def dice_loss(logits, targets, num_classes=NUM_CLASSES, smooth=1.0):
     probs = torch.softmax(logits, dim=1)
     targets_oh = F.one_hot(targets, num_classes).permute(0, 3, 1, 2).float()
-    total = 0.0
-    for c in range(1, num_classes):
-        p, t = probs[:, c], targets_oh[:, c]
-        total += (2.0 * (p * t).sum() + smooth) / (p.sum() + t.sum() + smooth)
-    return 1.0 - total / (num_classes - 1)
+    # Binary: compute Dice only for tumor class (class 1)
+    p = probs[:, 1]
+    t = targets_oh[:, 1]
+    intersection = (p * t).sum()
+    dice = (2.0 * intersection + smooth) / (p.sum() + t.sum() + smooth)
+    return 1.0 - dice
 
 
 def prepare_data(cfg, quick=False):
@@ -204,7 +205,7 @@ def visualize_preds(model, loader, device, path, n=4):
                        ha="center", va="center", fontsize=14, transform=axes[i][3].transAxes)
         axes[i][3].axis("off")
     patches = [mpatches.Patch(color=np.array(CLASS_COLORS_RGB[c])/255., label=CLASS_NAMES[c]) for c in range(NUM_CLASSES)]
-    fig.legend(handles=patches, loc="lower center", ncol=4, fontsize=9)
+    fig.legend(handles=patches, loc="lower center", ncol=NUM_CLASSES, fontsize=9)
     plt.tight_layout(); plt.savefig(path, bbox_inches="tight", dpi=100); plt.close()
     model.train()
 
@@ -219,7 +220,7 @@ def plot_curves(h, path):
     axes[1,0].set_title("Classification Accuracy"); axes[1,0].legend(); axes[1,0].grid(True, alpha=0.3)
     axes[1,1].plot(ep, h["lr"], "k-"); axes[1,1].set_title("Learning Rate"); axes[1,1].set_yscale("log"); axes[1,1].grid(True, alpha=0.3)
     for ax in axes.flat: ax.set_xlabel("Epoch")
-    plt.suptitle("Multi-Task Training Curves", fontsize=14); plt.tight_layout()
+    plt.suptitle("Multi-Task Training Curves (Binary Segmentation)", fontsize=14); plt.tight_layout()
     plt.savefig(path, dpi=150); plt.close()
 
 def plot_confusion_matrix(cm, path):
@@ -233,7 +234,7 @@ def plot_confusion_matrix(cm, path):
     ax.set_xticks(range(len(CLASS_NAMES))); ax.set_yticks(range(len(CLASS_NAMES)))
     ax.set_xticklabels([CLASS_NAMES[i] for i in range(len(CLASS_NAMES))], rotation=45, ha="right")
     ax.set_yticklabels([CLASS_NAMES[i] for i in range(len(CLASS_NAMES))])
-    ax.set_xlabel("Predicted"); ax.set_ylabel("True"); ax.set_title("Confusion Matrix - Multi-Task")
+    ax.set_xlabel("Predicted"); ax.set_ylabel("True"); ax.set_title("Confusion Matrix - Multi-Task (Binary)")
     plt.tight_layout(); plt.savefig(path, dpi=150); plt.close()
 
 
@@ -250,12 +251,13 @@ def train_multitask(quick=False):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("=" * 65)
-    print("  MULTI-TASK TRAINING (Segmentation + Classification)")
+    print("  MULTI-TASK TRAINING (Binary Segmentation + Classification)")
     print("=" * 65)
     print(f"  Device : {device}")
     if device.type == "cuda": print(f"  GPU    : {torch.cuda.get_device_name(0)}")
     print(f"  Epochs : {cfg['epochs']}")
     print(f"  Loss   : {cfg['seg_loss_weight']}*Focal+Dice + {cfg['cls_loss_weight']}*CE_cls")
+    print(f"  Classes: {NUM_CLASSES} (background, tumor)")
 
     print("\n--- Data ---")
     train_loader, val_loader, test_loader = prepare_data(cfg, quick)
@@ -375,8 +377,7 @@ def train_multitask(quick=False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Multi-task training")
+    parser = argparse.ArgumentParser(description="Multi-task binary segmentation training")
     parser.add_argument("--quick", action="store_true")
     args = parser.parse_args()
     train_multitask(quick=args.quick)
-

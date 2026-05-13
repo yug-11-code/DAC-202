@@ -1,6 +1,6 @@
 """
-evaluate.py - Advanced Evaluation Metrics for Brain Tumor Segmentation
-Brain Tumor Segmentation - BRISC 2025 Dataset
+evaluate.py - Advanced Evaluation Metrics for Brain Tumor Binary Segmentation
+Brain Tumor Binary Segmentation - BRISC 2025 Dataset
 
 Computes research-grade metrics on saved model checkpoints:
   - Dice Coefficient (per-class + mean)
@@ -148,8 +148,8 @@ def evaluate_image(pred, gt, num_classes=NUM_CLASSES):
     """Compute all metrics for a single image.
 
     Args:
-        pred: (H, W) int array, values in {0..3}
-        gt:   (H, W) int array, values in {0..3}
+        pred: (H, W) int array, values in {0, 1}
+        gt:   (H, W) int array, values in {0, 1}
 
     Returns:
         dict of per-class metrics
@@ -247,13 +247,13 @@ def evaluate_model(model, test_loader, device, model_type="single"):
                 "n": len(vals),
             }
 
+    # For binary: tumor metrics are just class 1
     tumor_metrics = {}
     for key in ["dice", "iou", "hd", "hd95", "asd", "volume_similarity"]:
-        vals = []
-        for c in range(1, NUM_CLASSES):
-            if key in aggregated[c]:
-                vals.append(aggregated[c][key]["mean"])
-        tumor_metrics[key] = float(np.mean(vals)) if vals else float("nan")
+        if key in aggregated.get(1, {}):
+            tumor_metrics[key] = aggregated[1][key]["mean"]
+        else:
+            tumor_metrics[key] = float("nan")
 
     return {
         "per_class": aggregated,
@@ -285,7 +285,7 @@ def print_eval_report(name, results):
         print(f"  {CLASS_NAMES[c]:12s} | {' '.join(vals)} | {n}")
 
     tm = results["tumor_mean"]
-    print(f"\n  Tumor Avg  : Dice={tm['dice']:.4f}  IoU={tm['iou']:.4f}  "
+    print(f"\n  Tumor      : Dice={tm['dice']:.4f}  IoU={tm['iou']:.4f}  "
           f"HD={tm['hd']:.2f}  HD95={tm['hd95']:.2f}  ASD={tm['asd']:.2f}")
 
 
@@ -327,7 +327,7 @@ def plot_comparison_advanced(all_results, out_dir):
         ax.set_title(title, fontsize=12, fontweight="bold")
         ax.grid(True, alpha=0.2, axis="y")
 
-    plt.suptitle("Advanced Metrics Comparison", fontsize=14, fontweight="bold")
+    plt.suptitle("Advanced Metrics Comparison (Binary Segmentation)", fontsize=14, fontweight="bold")
     plt.tight_layout()
     path = os.path.join(out_dir, "advanced_metrics_comparison.png")
     plt.savefig(path, dpi=150, bbox_inches="tight")
@@ -350,7 +350,7 @@ def plot_comparison_advanced(all_results, out_dir):
                         f"{v:.3f}", ha="center", va="bottom", fontsize=8)
     ax.set_xticks(x)
     ax.set_xticklabels([CLASS_NAMES[c] for c in range(NUM_CLASSES)], fontsize=11)
-    ax.set_title("Per-Class Dice Comparison", fontsize=13, fontweight="bold")
+    ax.set_title("Per-Class Dice Comparison (Binary)", fontsize=13, fontweight="bold")
     ax.set_ylabel("Dice Coefficient"); ax.legend(fontsize=10)
     ax.grid(True, alpha=0.2, axis="y"); ax.set_ylim(0, 1.05)
     plt.tight_layout()
@@ -367,7 +367,7 @@ def evaluate_all(model_filter=None, quick=False):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("=" * 70)
-    print("  ADVANCED EVALUATION — Brain Tumor Segmentation")
+    print("  ADVANCED EVALUATION — Brain Tumor Binary Segmentation")
     print("=" * 70)
     print(f"  Device: {device}")
     print(f"  Metrics: Dice, IoU, HD, HD95, ASD, Volume Similarity")
@@ -432,7 +432,7 @@ def evaluate_all(model_filter=None, quick=False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Advanced evaluation")
+    parser = argparse.ArgumentParser(description="Advanced evaluation (Binary)")
     parser.add_argument("--model", type=str, default=None,
                         choices=["focal_dice", "weighted_ce", "multitask"],
                         help="Evaluate single model")
@@ -440,5 +440,3 @@ if __name__ == "__main__":
                         help="Use small subset for testing")
     args = parser.parse_args()
     evaluate_all(model_filter=args.model, quick=args.quick)
-
-
