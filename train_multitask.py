@@ -37,7 +37,7 @@ from metrics import SegmentationMetrics, print_metrics
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "outputs")
 
 CONFIG = {
-    "seed": 42, "epochs": 20, "batch_size": 16,
+    "seed": 42, "epochs": 50, "batch_size": 16,
     "lr": 1e-3, "encoder_lr_factor": 0.01, "unfreeze_epoch": 5,
     "weight_decay": 1e-4,
     "cosine_T0": 10, "cosine_T_mult": 2,
