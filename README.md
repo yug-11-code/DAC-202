@@ -1,4 +1,4 @@
-# 🧠 Brain Tumor Binary Segmentation Pipeline
+# Brain Tumor Binary Segmentation Pipeline
 
 ### Binary Brain Tumor Segmentation from T1-Weighted MRI Using EfficientNet-B4 UNet with SCSE Attention and RMIF-Weighted Focal-Dice Loss
 
